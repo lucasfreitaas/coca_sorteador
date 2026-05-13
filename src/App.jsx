@@ -15,23 +15,52 @@ import {
   History,
   AlertCircle
 } from 'lucide-react';
+import { 
+  BarChart, 
+  Bar, 
+  XAxis, 
+  YAxis, 
+  Tooltip, 
+  ResponsiveContainer,
+  Cell
+} from 'recharts';
 import './App.css';
 import logo from './assets/logo.bmp';
 
 const App = () => {
   const [activeTab, setActiveTab] = useState('dashboard');
-  const [searchTerm, setSearchTerm] = useState('');
   const [cocas, setCocas] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState('');
   const [selectedPerson, setSelectedPerson] = useState(null);
   const [winner, setWinner] = useState(null);
   const [confirmData, setConfirmData] = useState(null); // { docId, name }
   const [isAddingCoca, setIsAddingCoca] = useState(false);
+  const [user, setUser] = useState(null); // { username, role }
+
+  const API_BASE = `http://${window.location.hostname}:3001`;
+
+  // Login handler
+  const handleLogin = (username, password) => {
+    if (username.toUpperCase() === 'ADMIN' && password === 'Cais@123') {
+      setUser({ username: 'Administrador', role: 'ADMIN' });
+      return true;
+    } else if (username.toUpperCase() === 'GERAL' && password === '123') {
+      setUser({ username: 'Colaborador', role: 'GERAL' });
+      return true;
+    }
+    return false;
+  };
+
+  const handleLogout = () => {
+    setUser(null);
+    setActiveTab('dashboard');
+  };
 
   // Fetch data from local backend
   const fetchCocas = () => {
     setLoading(true);
-    fetch('http://localhost:3001/api/cocas')
+    fetch(`${API_BASE}/api/cocas`)
       .then(res => res.json())
       .then(data => {
         if (Array.isArray(data)) {
@@ -49,13 +78,19 @@ const App = () => {
   };
 
   useEffect(() => {
-    fetchCocas();
-  }, []);
+    if (user) fetchCocas();
+  }, [user]);
+
+  // If not logged in, show login page
+  if (!user) {
+    return <LoginPage onLogin={handleLogin} logo={logo} />;
+  }
 
   // Save New Coca
   const handleSaveNewCoca = async (newCoca) => {
+    if (user.role !== 'ADMIN') return;
     try {
-      const res = await fetch('http://localhost:3001/api/cocas', {
+      const res = await fetch(`${API_BASE}/api/cocas`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newCoca)
@@ -74,6 +109,10 @@ const App = () => {
 
   // Payment Logic
   const handlePay = async (docId, name) => {
+    if (user.role !== 'ADMIN') {
+      alert("Apenas administradores podem baixar cocas.");
+      return;
+    }
     setConfirmData({ docId, name });
   };
 
@@ -82,7 +121,7 @@ const App = () => {
     const { docId } = confirmData;
     
     try {
-      const res = await fetch(`http://localhost:3001/api/cocas/pay/${docId}`, { method: 'PUT' });
+      const res = await fetch(`${API_BASE}/api/cocas/pay/${docId}`, { method: 'PUT' });
       const data = await res.json();
       if (res.ok) {
         setConfirmData(null);
@@ -136,9 +175,18 @@ const App = () => {
     item.main.RAZAO_SOCIAL.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  const chartData = Object.entries(groupedCocas)
+    .map(([name, data]) => ({
+      name: name.split(' ')[0],
+      fullName: name,
+      count: data.count
+    }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 8); // Top 8 for the chart
+
   return (
     <div className="app-container">
-      {/* Sidebar ... (remains same) */}
+      {/* Sidebar */}
       <aside className="sidebar">
         <div className="logo-container">
           <img src={logo} alt="SIAC Logo" className="company-logo" />
@@ -161,16 +209,22 @@ const App = () => {
             active={activeTab === 'queue'} 
             onClick={() => setActiveTab('queue')} 
           />
-          <NavItem 
-            icon={<Users size={20} />} 
-            label="Colaboradores" 
-            active={activeTab === 'users'} 
-            onClick={() => setActiveTab('users')} 
-          />
+          {user.role === 'ADMIN' && (
+            <NavItem 
+              icon={<Users size={20} />} 
+              label="Colaboradores" 
+              active={activeTab === 'users'} 
+              onClick={() => setActiveTab('users')} 
+            />
+          )}
         </nav>
 
         <div className="sidebar-footer">
           <NavItem icon={<Settings size={20} />} label="Configurações" />
+          <button className="nav-item logout-btn" onClick={handleLogout}>
+            <X size={20} />
+            <span>Sair</span>
+          </button>
         </div>
       </aside>
 
@@ -190,8 +244,11 @@ const App = () => {
           <div className="header-actions">
             <button className="icon-btn"><Bell size={20} /></button>
             <div className="user-profile">
-              <div className="avatar">AD</div>
-              <span>Administrador</span>
+              <div className="avatar">{user.username.charAt(0)}</div>
+              <div className="user-info">
+                <span>{user.username}</span>
+                <small>{user.role}</small>
+              </div>
             </div>
           </div>
         </header>
@@ -203,7 +260,7 @@ const App = () => {
             className="dashboard-view"
           >
             <section className="welcome-section">
-              <h1>Olá, Admin 👋</h1>
+              <h1>Olá, {user.username} 👋</h1>
               <p>Gerencie a dinâmica de cocas da SIAC conectada ao Oracle.</p>
             </section>
 
@@ -234,6 +291,49 @@ const App = () => {
               />
             </div>
 
+            {/* Chart Section */}
+            <div className="chart-section glass-card">
+              <div className="chart-header">
+                <h3>Ranking de Devedores</h3>
+                <p>Top 8 colaboradores com mais pendências</p>
+              </div>
+              <div className="chart-container">
+                <ResponsiveContainer width="100%" height={300}>
+                  <BarChart data={chartData} margin={{ top: 20, right: 30, left: 0, bottom: 5 }}>
+                    <XAxis 
+                      dataKey="name" 
+                      axisLine={false} 
+                      tickLine={false} 
+                      tick={{ fill: '#888', fontSize: 12 }}
+                    />
+                    <YAxis 
+                      axisLine={false} 
+                      tickLine={false} 
+                      tick={{ fill: '#888', fontSize: 12 }}
+                    />
+                    <Tooltip 
+                      cursor={{ fill: 'rgba(255,255,255,0.05)' }}
+                      contentStyle={{ 
+                        background: '#1a1a1a', 
+                        border: '1px solid var(--border)',
+                        borderRadius: '8px',
+                        fontSize: '12px'
+                      }}
+                      itemStyle={{ color: 'var(--primary)' }}
+                    />
+                    <Bar dataKey="count" radius={[4, 4, 0, 0]} barSize={40}>
+                      {chartData.map((entry, index) => (
+                        <Cell 
+                          key={`cell-${index}`} 
+                          fill={index === 0 ? 'var(--primary)' : 'rgba(244, 0, 0, 0.4)'} 
+                        />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
             {/* Action Row */}
             <div className="action-row">
               <h2>Fila de Pendências</h2>
@@ -241,9 +341,11 @@ const App = () => {
                 <button className="secondary-btn" onClick={handleDraw}>
                   <Dices size={18} /> Sortear Nome
                 </button>
-                <button className="primary-btn" onClick={() => setIsAddingCoca(true)}>
-                  <Plus size={18} /> Novo Registro
-                </button>
+                {user.role === 'ADMIN' && (
+                  <button className="primary-btn" onClick={() => setIsAddingCoca(true)}>
+                    <Plus size={18} /> Novo Registro
+                  </button>
+                )}
               </div>
             </div>
 
@@ -259,13 +361,13 @@ const App = () => {
                         <th>Colaborador</th>
                         <th>Motivo (Recente)</th>
                         <th>ID Documento</th>
-                        <th>Ação</th>
+                        {user.role === 'ADMIN' && <th>Ação</th>}
                         <th className="actions-header">Histórico</th>
                       </tr>
                     </thead>
                     <tbody>
                       {displayList.map((item) => (
-                        <tr key={`${item.main.RAZAO_SOCIAL}-${item.main.DOCUMENTO_ID}`}>
+                        <tr key={`${item.main.RAZAO_SOCIAL}-${item.main.DOCUMENTO_ID}-${Math.random()}`}>
                           <td>
                             <div className="user-cell">
                               <div className="mini-avatar">{item.main.RAZAO_SOCIAL.charAt(0)}</div>
@@ -274,14 +376,16 @@ const App = () => {
                           </td>
                           <td className="reason-cell">{item.main.OBSERVACAO_03 || 'N/A'}</td>
                           <td>#{item.main.DOCUMENTO_ID}</td>
-                          <td>
-                            <button 
-                              className="pay-badge-btn"
-                              onClick={() => handlePay(item.main.DOCUMENTO_ID, item.main.RAZAO_SOCIAL)}
-                            >
-                              Baixar Coca
-                            </button>
-                          </td>
+                          {user.role === 'ADMIN' && (
+                            <td>
+                              <button 
+                                className="pay-badge-btn"
+                                onClick={() => handlePay(item.main.DOCUMENTO_ID, item.main.RAZAO_SOCIAL)}
+                              >
+                                Baixar Coca
+                              </button>
+                            </td>
+                          )}
                           <td className="actions-cell">
                             <div className="actions-wrapper">
                               {item.count > 1 ? (
@@ -316,6 +420,7 @@ const App = () => {
             person={selectedPerson} 
             onClose={() => setSelectedPerson(null)} 
             onPay={handlePay}
+            userRole={user.role}
           />
         )}
       </AnimatePresence>
@@ -361,13 +466,14 @@ const AddCocaModal = ({ onClose, onSave }) => {
   const [reason, setReason] = useState('');
 
   useEffect(() => {
+    const API_BASE = `http://${window.location.hostname}:3001`;
     // Fetch Next ID
-    fetch('http://localhost:3001/api/next-id')
+    fetch(`${API_BASE}/api/next-id`)
       .then(res => res.json())
       .then(data => setNextId(data.nextId));
 
     // Fetch Collaborators
-    fetch('http://localhost:3001/api/collaborators')
+    fetch(`${API_BASE}/api/collaborators`)
       .then(res => res.json())
       .then(data => setCollaborators(data));
   }, []);
@@ -450,7 +556,7 @@ const AddCocaModal = ({ onClose, onSave }) => {
   );
 };
 
-const DetailsModal = ({ person, onClose, onPay }) => (
+const DetailsModal = ({ person, onClose, onPay, userRole }) => (
   <motion.div 
     initial={{ opacity: 0 }}
     animate={{ opacity: 1 }}
@@ -482,12 +588,14 @@ const DetailsModal = ({ person, onClose, onPay }) => (
                 <p className="item-reason">{coca.OBSERVACAO_03 || 'Motivo não especificado'}</p>
                 {idx === 0 && <span className="recent-tag">Mais Recente</span>}
               </div>
-              <button 
-                className="modal-pay-btn"
-                onClick={() => onPay(coca.DOCUMENTO_ID, person.main.RAZAO_SOCIAL)}
-              >
-                Baixar
-              </button>
+              {userRole === 'ADMIN' && (
+                <button 
+                  className="modal-pay-btn"
+                  onClick={() => onPay(coca.DOCUMENTO_ID, person.main.RAZAO_SOCIAL)}
+                >
+                  Baixar
+                </button>
+              )}
             </div>
           ))}
         </div>
@@ -580,3 +688,57 @@ const StatCard = ({ title, value, sub, icon, trend, onClick, isButton }) => (
 );
 
 export default App;
+
+const LoginPage = ({ onLogin, logo }) => {
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState(false);
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!onLogin(username, password)) {
+      setError(true);
+    }
+  };
+
+  return (
+    <div className="login-container">
+      <motion.div 
+        initial={{ opacity: 0, scale: 0.9 }}
+        animate={{ opacity: 1, scale: 1 }}
+        className="login-card glass-card"
+      >
+        <div className="login-header">
+          <img src={logo} alt="Logo" className="login-logo" />
+          <h2>Coca Dynamics</h2>
+          <p>Gestão de Penalidades SIAC</p>
+        </div>
+
+        <form onSubmit={handleSubmit} className="login-form">
+          <div className="form-group">
+            <label>Usuário</label>
+            <input 
+              type="text" 
+              placeholder="Digite seu usuário..." 
+              value={username}
+              onChange={(e) => { setUsername(e.target.value); setError(false); }}
+              required
+            />
+          </div>
+          <div className="form-group">
+            <label>Senha</label>
+            <input 
+              type="password" 
+              placeholder="Digite sua senha..." 
+              value={password}
+              onChange={(e) => { setPassword(e.target.value); setError(false); }}
+              required
+            />
+          </div>
+          {error && <p className="login-error">Usuário ou senha incorretos!</p>}
+          <button type="submit" className="primary-btn login-btn">Entrar no Sistema</button>
+        </form>
+      </motion.div>
+    </div>
+  );
+};
